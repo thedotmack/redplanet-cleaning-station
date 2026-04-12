@@ -1,5 +1,7 @@
 # Red Planet Cleaning Station
 
+![MARS robot driving through the Red Planet cleaning station](assets/cleaning-station.jpg)
+
 An autonomous self-reflective correction demo for MARS robots — the robot looks in a mirror, notices it's dirty, narrates what it sees, and drives itself through a brush station to clean up.
 
 Built on Innate's Rosbridge v2.0 WebSocket stack over ROS2.
