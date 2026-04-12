@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///Users/alexnewman/conductor/workspaces/stixbot/tripoli/web/app/layout.tsx"],"sourcesContent":["import type { Metadata } from \"next\";\nimport \"./globals.css\";\n\nexport const metadata: Metadata = {\n  title: \"MARS Robot Control\",\n  description: \"Control interface for MARS robots via rosbridge WebSocket\",\n};\n\nexport default function RootLayout({\n  children,\n}: {\n  children: React.ReactNode;\n}) {\n  return (\n    <html lang=\"en\" className=\"dark\">\n      <body className=\"bg-gray-950 text-gray-100 min-h-screen antialiased\">\n        {children}\n      </body>\n    </html>\n  );\n}\n"],"names":[],"mappings":";;;;;;;;;AAGO,MAAM,WAAqB;IAChC,OAAO;IACP,aAAa;AACf;AAEe,SAAS,WAAW,EACjC,QAAQ,EAGT;IACC,qBACE,qPAAC;QAAK,MAAK;QAAK,WAAU;kBACxB,cAAA,qPAAC;YAAK,WAAU;sBACb;;;;;;;;;;;AAIT","debugId":null}},
+    {"offset": {"line": 39, "column": 0}, "map": {"version":3,"sources":["file:///Users/alexnewman/conductor/workspaces/stixbot/tripoli/web/node_modules/next/src/server/route-modules/app-page/vendored/rsc/react-jsx-dev-runtime.ts"],"sourcesContent":["module.exports = (\n  require('../../module.compiled') as typeof import('../../module.compiled')\n).vendored['react-rsc']!.ReactJsxDevRuntime\n"],"names":["module","exports","require","vendored","ReactJsxDevRuntime"],"mappings":"AAAAA,OAAOC,OAAO,GACZC,QAAQ,gIACRC,QAAQ,CAAC,YAAY,CAAEC,kBAAkB","ignoreList":[0],"debugId":null}}]
+}
