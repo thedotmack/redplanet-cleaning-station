@@ -29,6 +29,33 @@ bun run src/demo-self-clean.ts 172.17.30.145
 
 ---
 
+## Demo Gallery
+
+*Photos taken by the robot's own camera during the live demo run.*
+
+**1. Worm's eye view — robot observing the room before the sequence**
+![Worm's eye view of the room from ground level](assets/demo-01-worm-eye-view.jpg)
+
+**2. Initial orientation check — scanning the space**
+![Robot's initial view of the room](assets/demo-02-initial-orientation.jpg)
+
+**3. Looking toward the mirror — head tilted down**
+![Robot looking toward the mirror with head tilted](assets/demo-03-looking-at-mirror.jpg)
+
+**4. Turning 180° — brush station comes into view**
+![Robot's view of the Red Planet brush station directly ahead](assets/demo-04-brush-station-ahead.jpg)
+
+**5. Inside the chair — first pass attempt**
+![Robot's POV from inside the chair station](assets/demo-05-inside-the-chair.jpg)
+
+**6. Backing up to realign — path correction**
+![Robot backed up and realigned with the brush station](assets/demo-06-realigning.jpg)
+
+**7. The cleaning station — exterior shot**
+![MARS robot driving through the Red Planet cleaning station](assets/cleaning-station.jpg)
+
+---
+
 ## Architecture
 
 ```
