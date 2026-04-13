@@ -14,6 +14,21 @@ Rosbridge v2.0 WebSocket client for controlling MARS robots over ROS2.
 bun run src/repl.ts <robot-ip> [port]
 ```
 
+## Claude Code Skill
+
+This repo includes the `mars-robot-control` Claude Code skill at `skills/mars-robot-control/`.
+**Edit the skill here** — the repo is the source of truth. After editing, install to the
+user's local skill directory by copying:
+
+```sh
+cp -R skills/mars-robot-control/ ~/.claude/skills/mars-robot-control/
+```
+
+The skill is what Claude Code uses to understand how to control the robot via rosbridge.
+It contains `SKILL.md` (the main instruction file), `references/` (detailed subsystem docs),
+`scripts/` (robot-cmd.ts, setup.sh), and `innate-os/` (the cloned innate-os repo for
+message definitions and skill source code).
+
 ## Architecture
 
 - `src/rosbridge-client.ts` — Core WebSocket client (topics, services, actions, `executeSkill()`, `callGotoJS()`)

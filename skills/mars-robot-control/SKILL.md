@@ -134,6 +134,146 @@ For the full skill source, read the Python files:
 
 Read `references/skill-execution.md` for monitoring, cancellation, and physical skill details.
 
+### Built-in innate-os Skills Reference
+
+**Prefer using these skills over raw topic/service calls.** Each skill is a
+tested Python class running on the Jetson that handles sensor subscriptions,
+interface injection, trajectory planning, error recovery, and state updates
+at 50Hz — things that are hard to replicate correctly via raw rosbridge commands.
+
+#### `innate-os/head_emotion` — Express emotions through head movement
+
+Plays a tilt animation expressing an emotion. The safest skill to test with.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `emotion` | string | *(required)* | One of: `happy`, `sad`, `excited`, `thinking`, `disappointed`, `surprised`, `confused`, `angry`, `sleepy`, `proud`, `agreeing`, `disagreeing` |
+| `repeat` | int | `1` | Number of times to repeat the animation |
+
+```json
+{"skill_type": "innate-os/head_emotion", "inputs": "{\"emotion\": \"happy\", \"repeat\": 2}"}
+```
+
+#### `innate-os/arm_move_to_xyz` — Move arm to a Cartesian position
+
+Moves the end-effector to an XYZ position relative to `base_link` using
+inverse kinematics. Handles MoveIt planning, collision checking, and smooth
+trajectory execution internally.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `x` | float | *(required)* | Forward distance from base (meters) |
+| `y` | float | *(required)* | Left/right offset (meters, positive = left) |
+| `z` | float | *(required)* | Height (meters) |
+| `roll` | float | `0.0` | End-effector roll (radians) |
+| `pitch` | float | `0.0` | End-effector pitch (radians) |
+| `yaw` | float | `0.0` | End-effector yaw (radians) |
+| `duration` | int | `3` | Movement duration (seconds) |
+
+```json
+{"skill_type": "innate-os/arm_move_to_xyz", "inputs": "{\"x\": 0.2, \"y\": 0.0, \"z\": 0.3}"}
+```
+
+#### `innate-os/arm_zero_position` — Return arm to home position
+
+Moves all arm joints to 0 radians (the home/stowed position). Use this to
+reset the arm to a known state before starting a new task.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `duration` | int | `3` | Movement duration (seconds) |
+
+```json
+{"skill_type": "innate-os/arm_zero_position", "inputs": "{\"duration\": 3}"}
+```
+
+#### `innate-os/arm_circle_motion` — Move arm in a circular pattern
+
+Traces a circle in the YZ plane (vertical) while maintaining constant X.
+Useful for demonstrations, cleaning motions, or attention-getting gestures.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `center_x` | float | `0.2` | X position to hold constant (meters) |
+| `center_y` | float | `-0.05` | Circle center Y (meters) |
+| `center_z` | float | `0.2` | Circle center Z (meters) |
+| `radius` | float | `0.1` | Circle radius (meters) |
+| `num_loops` | int | `1` | Number of full circles |
+| `points_per_loop` | int | `16` | Waypoints per circle (higher = smoother) |
+| `duration_per_point` | float | `0.5` | Seconds per waypoint |
+
+```json
+{"skill_type": "innate-os/arm_circle_motion", "inputs": "{\"radius\": 0.08, \"num_loops\": 2}"}
+```
+
+#### `innate-os/arm_utils` — Arm servo utility commands
+
+Low-level arm servo management. Most important use: toggling servo torque.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `command` | string | *(required)* | `torque_on` or `torque_off` |
+
+```json
+{"skill_type": "innate-os/arm_utils", "inputs": "{\"command\": \"torque_on\"}"}
+```
+
+**WARNING**: `torque_off` lets the arm fall under gravity. Only use if servos
+are overloaded or the arm is in a dangerous position.
+
+#### `innate-os/navigate_to_position` — Navigate to a map or local position
+
+Uses Nav2 path planning to drive the robot to a target pose. Handles obstacle
+avoidance, path replanning, and arrival detection automatically.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `x` | float | *(required)* | Target X position (meters) |
+| `y` | float | *(required)* | Target Y position (meters) |
+| `theta` | float | *(required)* | Target orientation (radians) |
+| `local_frame` | bool | `false` | If true, coordinates are relative to robot's current pose instead of the map frame |
+
+```json
+{"skill_type": "innate-os/navigate_to_position", "inputs": "{\"x\": 1.0, \"y\": 0.5, \"theta\": 0.0, \"local_frame\": true}"}
+```
+
+#### `innate-os/navigate_with_vision` — Vision-guided natural language navigation
+
+Sends a natural-language navigation instruction to the UniNavid cloud service.
+The robot uses camera input to follow the instruction visually (e.g., "walk
+to the red chair and stop"). Requires cloud connectivity.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `instruction` | string | *(required)* | Natural language navigation command |
+
+```json
+{"skill_type": "innate-os/navigate_with_vision", "inputs": "{\"instruction\": \"drive to the table and stop\"}"}
+```
+
+#### `innate-os/orbital_shot` — Orbit around a point while facing it
+
+Drives the robot in a circle around a target point, keeping the camera
+pointed at the center. Useful for inspection or cinematic shots.
+
+```json
+{"skill_type": "innate-os/orbital_shot", "inputs": "{}"}
+```
+
+#### `innate-os/scan_for_objects` — 360-degree object scan
+
+Rotates the robot 360 degrees while capturing images and using Gemini vision
+to detect and catalog objects. Returns detected objects with their approximate
+directions relative to the robot's starting orientation.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `target_object` | string | `null` | If set, scan specifically for this object type |
+
+```json
+{"skill_type": "innate-os/scan_for_objects", "inputs": "{\"target_object\": \"fire extinguisher\"}"}
+```
+
 ## Direct Control (Secondary Interface)
 
 For real-time control loops or things that don't have a skill, use raw topics/services.

@@ -1,10 +1,864 @@
 "use client";
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRobot, type LogEntry, type ConnectionStatus } from "./hooks/useRobot";
 import { SkillIds, SPEED_CAPS, type SkillInfo } from "./lib/rosbridge";
 
-// ─── Connection Bar ────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const HEAD_TILT_MIN_DEGREES = -25;
+const HEAD_TILT_MAX_DEGREES = 25;
+const HEAD_TILT_STEP_DEGREES = 5;
+
+const ARM_JOINTS = [
+  { name: "Base",     min: -1.5708, max: 1.5708 },
+  { name: "Shoulder", min: -1.5708, max: 1.22   },
+  { name: "Elbow",    min: -1.5708, max: 1.7453 },
+  { name: "Wrist 1",  min: -1.9199, max: 1.7453 },
+  { name: "Wrist 2",  min: -1.5708, max: 1.5708 },
+  { name: "Wrist 3",  min: -0.8727, max: 0.3491 },
+];
+
+const ARM_STEP_OPTIONS = [0.01, 0.05, 0.1, 0.5];
+
+const EMOTIONS = [
+  { id: "happy", label: "Happy" },
+  { id: "sad", label: "Sad" },
+  { id: "excited", label: "Excited" },
+  { id: "surprised", label: "Surprised" },
+  { id: "angry", label: "Angry" },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<ConnectionStatus, string> = {
+  disconnected: "bg-gray-500",
+  connecting: "bg-yellow-500 animate-pulse",
+  connected: "bg-green-500",
+  error: "bg-red-500",
+};
+
+const LOG_TYPE_COLORS: Record<LogEntry["type"], string> = {
+  info: "text-gray-400",
+  error: "text-red-400",
+  feedback: "text-yellow-400",
+  result: "text-green-400",
+};
+
+const LOG_TYPE_LABELS: Record<LogEntry["type"], string> = {
+  info: "INFO",
+  error: "ERR",
+  feedback: "FEED",
+  result: "RSLT",
+};
+
+/** Detect TTS log entries from useRobot's speak() which logs as: TTS: "text" */
+function isTtsLog(log: LogEntry): boolean {
+  return log.type === "info" && log.message.startsWith('TTS: "');
+}
+
+function extractTtsText(log: LogEntry): string {
+  const match = log.message.match(/^TTS: "(.+)"$/);
+  return match ? match[1] : log.message;
+}
+
+function downloadImageFrame(frame: string, label: string) {
+  const link = document.createElement("a");
+  link.href = frame;
+  link.download = `${label.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.jpg`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function Home() {
+  const robot = useRobot();
+
+  // ── Lifted state ──
+  const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set());
+  const [showArmPanel, setShowArmPanel] = useState(false);
+  const [showSkillPanel, setShowSkillPanel] = useState(false);
+  const [speed, setSpeed] = useState(0.15);
+  const [tilt, setTilt] = useState(0);
+  const [ttsText, setTtsText] = useState("");
+
+  // ── Refs ──
+  const activeKeysRef = useRef<Set<string>>(new Set());
+  const driveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const logScrollRef = useRef<HTMLDivElement>(null);
+
+  // ── Arm panel state ──
+  const [targetJoints, setTargetJoints] = useState<number[]>([0, 0, 0, 0, 0, 0]);
+  const [armDuration, setArmDuration] = useState(2.0);
+  const [armSynced, setArmSynced] = useState(false);
+  const [armStepRadians, setArmStepRadians] = useState(0.1);
+
+  // ── Skill panel state ──
+  const [selectedSkillId, setSelectedSkillId] = useState("");
+  const [skillInputsJson, setSkillInputsJson] = useState("{}");
+  const [skillJsonError, setSkillJsonError] = useState("");
+
+  // ── Visualizer animation state ──
+  const [visualizerTick, setVisualizerTick] = useState(0);
+
+  const isDisabled = robot.connectionStatus !== "connected";
+
+  // Stable refs to avoid effect re-runs
+  const { publishCmdVel, stopDriving, estop } = robot;
+  const speedRef = useRef(speed);
+  useEffect(() => { speedRef.current = speed; }, [speed]);
+
+  // ── Keyboard drive controls ──
+
+  const updateDriveFromKeys = useCallback(() => {
+    const keys = activeKeysRef.current;
+    let linearX = 0;
+    let angularZ = 0;
+    const currentSpeed = speedRef.current;
+
+    if (keys.has("w")) linearX += currentSpeed;
+    if (keys.has("s")) linearX -= currentSpeed;
+    if (keys.has("a")) angularZ += currentSpeed * (SPEED_CAPS.MAX_ANGULAR_RADPS / SPEED_CAPS.MAX_LINEAR_MPS);
+    if (keys.has("d")) angularZ -= currentSpeed * (SPEED_CAPS.MAX_ANGULAR_RADPS / SPEED_CAPS.MAX_LINEAR_MPS);
+
+    if (linearX !== 0 || angularZ !== 0) {
+      publishCmdVel(linearX, angularZ);
+    }
+  }, [publishCmdVel]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (e.key === " ") {
+        e.preventDefault();
+        estop();
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      const keyMap: Record<string, string> = {
+        arrowup: "w", arrowdown: "s", arrowleft: "a", arrowright: "d",
+      };
+      const mappedKey = keyMap[key] || key;
+      if (["w", "a", "s", "d"].includes(mappedKey) && !activeKeysRef.current.has(mappedKey)) {
+        e.preventDefault();
+        activeKeysRef.current.add(mappedKey);
+        setActiveKeys(new Set(activeKeysRef.current));
+
+        if (!driveIntervalRef.current) {
+          driveIntervalRef.current = setInterval(updateDriveFromKeys, 100);
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      const keyMap: Record<string, string> = {
+        arrowup: "w", arrowdown: "s", arrowleft: "a", arrowright: "d",
+      };
+      const mappedKey = keyMap[key] || key;
+      if (["w", "a", "s", "d"].includes(mappedKey)) {
+        activeKeysRef.current.delete(mappedKey);
+        setActiveKeys(new Set(activeKeysRef.current));
+
+        if (activeKeysRef.current.size === 0) {
+          if (driveIntervalRef.current) {
+            clearInterval(driveIntervalRef.current);
+            driveIntervalRef.current = null;
+          }
+          stopDriving();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      if (driveIntervalRef.current) {
+        clearInterval(driveIntervalRef.current);
+      }
+    };
+  }, [estop, stopDriving, updateDriveFromKeys]);
+
+  // ── Auto-scroll logs ──
+  useEffect(() => {
+    if (logScrollRef.current) {
+      logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+    }
+  }, [robot.logs]);
+
+  // ── Visualizer animation tick ──
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisualizerTick((t) => t + 1);
+    }, 300);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Arm sync effect ──
+  useEffect(() => {
+    if (armSynced) {
+      setTargetJoints([...robot.armJoints]);
+      setArmSynced(false);
+    }
+  }, [robot.armJoints, armSynced]);
+
+  // ── Skill template pre-fill ──
+  const selectedSkill = robot.availableSkills.find((s) => s.id === selectedSkillId);
+
+  useEffect(() => {
+    if (selectedSkill?.inputs_json) {
+      try {
+        const schema = JSON.parse(selectedSkill.inputs_json);
+        const template: Record<string, unknown> = {};
+        if (schema.properties) {
+          for (const [key, prop] of Object.entries(schema.properties)) {
+            const p = prop as Record<string, unknown>;
+            if (p.default !== undefined) {
+              template[key] = p.default;
+            } else if (p.type === "number") {
+              template[key] = 0.0;
+            } else if (p.type === "string") {
+              template[key] = "";
+            } else if (p.type === "boolean") {
+              template[key] = false;
+            }
+          }
+        }
+        setSkillInputsJson(JSON.stringify(template, null, 2));
+        setSkillJsonError("");
+      } catch {
+        setSkillInputsJson("{}");
+      }
+    } else {
+      setSkillInputsJson("{}");
+    }
+  }, [selectedSkillId, selectedSkill]);
+
+  // ── Handlers ──
+
+  const handleEmotion = (emotion: string) => {
+    robot.executeSkill(SkillIds.HEAD_EMOTION, { emotion });
+  };
+
+  const handleDriveButton = (linearX: number, angularZ: number) => {
+    robot.publishCmdVel(linearX * speed, angularZ * speed * (SPEED_CAPS.MAX_ANGULAR_RADPS / SPEED_CAPS.MAX_LINEAR_MPS));
+  };
+
+  const handleTiltAdjust = (delta: number) => {
+    const next = Math.max(HEAD_TILT_MIN_DEGREES, Math.min(HEAD_TILT_MAX_DEGREES, tilt + delta));
+    setTilt(next);
+    robot.setHeadTilt(next);
+  };
+
+  const handleSpeak = () => {
+    if (ttsText.trim()) {
+      robot.speak(ttsText.trim());
+      setTtsText("");
+    }
+  };
+
+  const adjustJoint = (index: number, delta: number) => {
+    setTargetJoints((prev) => {
+      const next = [...prev];
+      const clamped = Math.max(ARM_JOINTS[index].min, Math.min(ARM_JOINTS[index].max, prev[index] + delta));
+      next[index] = Math.round(clamped * 10000) / 10000;
+      return next;
+    });
+  };
+
+  const handleArmSyncFromRobot = () => {
+    robot.readArmState();
+    setArmSynced(true);
+  };
+
+  const handleSkillExecute = () => {
+    try {
+      const inputs = JSON.parse(skillInputsJson);
+      setSkillJsonError("");
+      robot.executeSkill(selectedSkillId, inputs);
+    } catch (err) {
+      setSkillJsonError(err instanceof Error ? err.message : "Invalid JSON");
+    }
+  };
+
+  // ── WASD button styling ──
+  const wasdBtnClass = (key: string) =>
+    `w-9 h-9 rounded-lg font-bold text-xs transition-all ${
+      activeKeys.has(key)
+        ? "bg-cyan-500 text-white scale-95"
+        : "bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700/50"
+    } ${isDisabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer active:scale-95"}`;
+
+  // ── Visualizer state derivation ──
+  type RobotState = "disconnected" | "connecting" | "connected" | "executingSkill";
+  const robotState: RobotState =
+    robot.executingSkill ? "executingSkill" :
+    robot.connectionStatus === "connected" ? "connected" :
+    robot.connectionStatus === "connecting" ? "connecting" :
+    "disconnected";
+
+  const getBarStyle = (barIndex: number): { height: string; backgroundColor: string } => {
+    switch (robotState) {
+      case "disconnected":
+        return { height: "12px", backgroundColor: "rgba(55,65,81,0.2)" };
+      case "connecting": {
+        const active = visualizerTick % 5;
+        const isActive = barIndex === active;
+        return {
+          height: isActive ? "32px" : "12px",
+          backgroundColor: isActive ? "rgb(6,182,212)" : "rgba(6,182,212,0.15)",
+        };
+      }
+      case "connected": {
+        // Gentle idle pulse — varying heights based on tick
+        const baseHeights = [14, 20, 24, 20, 14];
+        const offset = (visualizerTick + barIndex) % 4;
+        const h = baseHeights[barIndex] + (offset < 2 ? 4 : 0);
+        return {
+          height: `${h}px`,
+          backgroundColor: "rgba(6,182,212,0.3)",
+        };
+      }
+      case "executingSkill": {
+        // Fast sequential highlight
+        const active = visualizerTick % 5;
+        const dist = Math.abs(barIndex - active);
+        const isActive = dist === 0;
+        const isNear = dist === 1;
+        return {
+          height: isActive ? "40px" : isNear ? "28px" : "16px",
+          backgroundColor: isActive ? "rgb(6,182,212)" : isNear ? "rgba(6,182,212,0.5)" : "rgba(6,182,212,0.15)",
+        };
+      }
+    }
+  };
+
+  // ── Render ──
+
+  return (
+    <div className="h-svh dot-grid-bg flex flex-col overflow-hidden">
+
+      {/* ── ConnectionBar ── */}
+      <ConnectionBar
+        connectionStatus={robot.connectionStatus}
+        onConnect={robot.connect}
+        onDisconnect={robot.disconnect}
+      />
+
+      {/* ── Main scrollable content ── */}
+      <main className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="max-w-4xl mx-auto px-4 pb-[320px] space-y-4 pt-4">
+
+          {/* ── CameraHero ── */}
+          <div className="relative w-full aspect-video bg-gray-900 rounded-xl overflow-hidden border border-gray-800/50">
+            {robot.mainCameraFrame ? (
+              <img src={robot.mainCameraFrame} alt="Main Camera" className="w-full h-full object-contain" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <span className="text-gray-700 text-sm font-mono">No camera feed</span>
+              </div>
+            )}
+
+            {/* Arm camera PiP */}
+            <div className="absolute bottom-3 right-3 w-1/4 aspect-video bg-gray-900 rounded-lg overflow-hidden border border-gray-700/50 shadow-lg">
+              {robot.armCameraFrame ? (
+                <img src={robot.armCameraFrame} alt="Arm Camera" className="w-full h-full object-contain" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <span className="text-gray-700 text-[10px] font-mono">Arm cam</span>
+                </div>
+              )}
+            </div>
+
+            {/* Floating camera controls — top-right */}
+            <div className="absolute top-3 right-3 flex gap-1.5">
+              <button
+                onClick={robot.toggleMainCameraStream}
+                disabled={isDisabled}
+                className={`px-2.5 py-1 rounded-full text-[10px] font-medium backdrop-blur transition-colors disabled:opacity-40 ${
+                  robot.mainCameraStreaming
+                    ? "bg-red-600/80 text-white"
+                    : "bg-gray-900/80 text-gray-300 hover:bg-gray-800/80"
+                }`}
+              >
+                {robot.mainCameraStreaming ? "Stop" : "Stream"}
+              </button>
+              <button
+                onClick={robot.toggleArmCameraStream}
+                disabled={isDisabled}
+                className={`px-2.5 py-1 rounded-full text-[10px] font-medium backdrop-blur transition-colors disabled:opacity-40 ${
+                  robot.armCameraStreaming
+                    ? "bg-red-600/80 text-white"
+                    : "bg-gray-900/80 text-gray-300 hover:bg-gray-800/80"
+                }`}
+              >
+                {robot.armCameraStreaming ? "Stop Arm" : "Arm"}
+              </button>
+              {robot.mainCameraFrame && (
+                <button
+                  onClick={() => downloadImageFrame(robot.mainCameraFrame!, "main-camera")}
+                  className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-gray-900/80 text-gray-300 hover:bg-gray-800/80 backdrop-blur transition-colors"
+                >
+                  Save
+                </button>
+              )}
+              {!robot.mainCameraStreaming && (
+                <button
+                  onClick={robot.captureMainPhoto}
+                  disabled={isDisabled}
+                  className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-gray-900/80 text-gray-300 hover:bg-gray-800/80 backdrop-blur transition-colors disabled:opacity-40"
+                >
+                  Photo
+                </button>
+              )}
+            </div>
+
+            {/* Live indicator — top-left */}
+            {(robot.mainCameraStreaming || robot.armCameraStreaming) && (
+              <div className="absolute top-3 left-3 flex items-center gap-1.5 text-xs text-red-400">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                LIVE
+              </div>
+            )}
+          </div>
+
+          {/* ── StateVisualizer ── */}
+          <div className="flex items-end justify-center h-12 gap-1.5">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="w-1.5 rounded-full transition-all duration-200 origin-bottom"
+                style={getBarStyle(i)}
+              />
+            ))}
+          </div>
+
+          {/* ── ChatTranscript ── */}
+          <div className="relative">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-[#030712] to-transparent z-10" />
+
+            <div
+              ref={logScrollRef}
+              className="max-h-[240px] overflow-y-auto custom-scrollbar space-y-2 px-1"
+            >
+              {robot.logs.length === 0 ? (
+                <p className="text-gray-700 italic text-sm pt-8 text-center">
+                  Connect to the robot to begin.
+                </p>
+              ) : (
+                robot.logs.map((log, i) => (
+                  <div key={i} className={isTtsLog(log) ? "flex justify-end" : ""}>
+                    {isTtsLog(log) ? (
+                      <div className="bg-gray-800 text-gray-200 rounded-[22px] px-4 py-2.5 text-sm max-w-[85%]">
+                        {extractTtsText(log)}
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="text-[10px] text-gray-600 font-mono">
+                          {new Date(log.timestamp).toLocaleTimeString()} [{LOG_TYPE_LABELS[log.type]}]
+                        </span>
+                        <div className={`text-sm ${LOG_TYPE_COLORS[log.type]}`}>{log.message}</div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+
+              {robot.executingSkill && (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <span
+                    className="w-2 h-2 rounded-full bg-cyan-500"
+                    style={{ animation: "dot-pulse 1.5s ease-in-out infinite" }}
+                  />
+                  Processing...
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+      </main>
+
+      {/* ── ControlBar (bottom-anchored pill) ── */}
+      <div className="fixed inset-x-3 bottom-3 z-50 md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-2xl">
+        <div className="bg-gray-950/95 backdrop-blur-xl border border-gray-800/50 rounded-[24px] p-3 shadow-2xl shadow-black/50 space-y-2.5">
+
+          {/* Row 1: Speech input — most prominent */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={ttsText}
+              onChange={(e) => setTtsText(e.target.value)}
+              placeholder="Say something..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSpeak();
+              }}
+              disabled={isDisabled}
+              className="flex-1 h-10 px-4 bg-gray-900/80 border border-gray-800/50 rounded-full text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 transition-colors disabled:opacity-40"
+            />
+            <button
+              onClick={handleSpeak}
+              disabled={isDisabled || !ttsText.trim()}
+              className="h-10 px-5 bg-cyan-600 hover:bg-cyan-700 rounded-full text-sm font-medium transition-colors disabled:opacity-40"
+            >
+              Speak
+            </button>
+          </div>
+
+          {/* Row 2: Drive + Speed + Head */}
+          <div className="flex items-center gap-3">
+            {/* Compact WASD */}
+            <div className="flex flex-col items-center gap-0.5 shrink-0">
+              <button
+                className={wasdBtnClass("w")}
+                onPointerDown={() => handleDriveButton(1, 0)}
+                onPointerUp={robot.stopDriving}
+                onPointerLeave={robot.stopDriving}
+                disabled={isDisabled}
+              >
+                W
+              </button>
+              <div className="flex gap-0.5">
+                <button
+                  className={wasdBtnClass("a")}
+                  onPointerDown={() => handleDriveButton(0, 1)}
+                  onPointerUp={robot.stopDriving}
+                  onPointerLeave={robot.stopDriving}
+                  disabled={isDisabled}
+                >
+                  A
+                </button>
+                <button
+                  className="w-9 h-9 rounded-lg bg-gray-800/50 border border-gray-800 flex items-center justify-center"
+                  onClick={robot.stopDriving}
+                  disabled={isDisabled}
+                >
+                  <div className="w-2 h-2 rounded-full bg-gray-600" />
+                </button>
+                <button
+                  className={wasdBtnClass("d")}
+                  onPointerDown={() => handleDriveButton(0, -1)}
+                  onPointerUp={robot.stopDriving}
+                  onPointerLeave={robot.stopDriving}
+                  disabled={isDisabled}
+                >
+                  D
+                </button>
+              </div>
+              <button
+                className={wasdBtnClass("s")}
+                onPointerDown={() => handleDriveButton(-1, 0)}
+                onPointerUp={robot.stopDriving}
+                onPointerLeave={robot.stopDriving}
+                disabled={isDisabled}
+              >
+                S
+              </button>
+            </div>
+
+            {/* Speed slider */}
+            <div className="flex-1 space-y-1 min-w-0">
+              <div className="flex justify-between text-[10px] text-gray-600">
+                <span className="uppercase tracking-wider">Speed</span>
+                <span className="font-mono text-gray-400">{speed.toFixed(2)} m/s</span>
+              </div>
+              <input
+                type="range"
+                min={0.05}
+                max={SPEED_CAPS.MAX_LINEAR_MPS}
+                step={0.01}
+                value={speed}
+                onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                className="w-full accent-cyan-500 h-1.5"
+                disabled={isDisabled}
+              />
+            </div>
+
+            {/* Head tilt */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => handleTiltAdjust(HEAD_TILT_STEP_DEGREES)}
+                disabled={isDisabled || tilt >= HEAD_TILT_MAX_DEGREES}
+                className="w-9 h-9 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700/50 text-gray-400 font-bold text-sm transition-all disabled:opacity-30 active:scale-95"
+              >
+                ▲
+              </button>
+              <span className="text-xs font-mono text-gray-400 w-8 text-center">{tilt}&deg;</span>
+              <button
+                onClick={() => handleTiltAdjust(-HEAD_TILT_STEP_DEGREES)}
+                disabled={isDisabled || tilt <= HEAD_TILT_MIN_DEGREES}
+                className="w-9 h-9 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700/50 text-gray-400 font-bold text-sm transition-all disabled:opacity-30 active:scale-95"
+              >
+                ▼
+              </button>
+            </div>
+
+            {/* Separator */}
+            <div className="w-px h-10 bg-gray-800 shrink-0" />
+
+            {/* Panel toggles */}
+            <div className="flex flex-col gap-1 shrink-0">
+              <button
+                onClick={() => setShowArmPanel(true)}
+                disabled={isDisabled}
+                className="px-3 h-8 rounded-lg text-[11px] font-medium bg-amber-600/15 text-amber-400 border border-amber-500/20 transition-colors disabled:opacity-40 hover:bg-amber-600/25"
+              >
+                Arm
+              </button>
+              <button
+                onClick={() => setShowSkillPanel(true)}
+                disabled={isDisabled}
+                className="px-3 h-8 rounded-lg text-[11px] font-medium bg-green-600/15 text-green-400 border border-green-500/20 transition-colors disabled:opacity-40 hover:bg-green-600/25"
+              >
+                Skills
+              </button>
+            </div>
+          </div>
+
+          {/* Row 3: Emotions */}
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            {EMOTIONS.map((e) => (
+              <button
+                key={e.id}
+                onClick={() => handleEmotion(e.id)}
+                disabled={isDisabled || robot.executingSkill}
+                className="px-3 h-8 rounded-full text-[11px] font-medium bg-gray-800/50 text-gray-400 hover:bg-gray-700/60 border border-gray-700/20 transition-colors disabled:opacity-40 shrink-0"
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Row 4: E-Stop — always full width */}
+          <button
+            onClick={robot.estop}
+            disabled={isDisabled}
+            className="w-full h-11 bg-red-700 hover:bg-red-600 active:bg-red-800 border border-red-500/50 rounded-xl text-sm font-black uppercase tracking-widest transition-all active:scale-[0.98] shadow-lg shadow-red-900/30 disabled:opacity-40"
+          >
+            E-STOP
+          </button>
+
+        </div>
+      </div>
+
+      {/* ── ArmPanel (slide-up overlay) ── */}
+      {showArmPanel && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowArmPanel(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-50 animate-slide-up">
+            <div className="max-w-2xl mx-auto bg-gray-950 border-t border-gray-800 rounded-t-2xl p-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Arm Control</h3>
+                <button
+                  onClick={() => setShowArmPanel(false)}
+                  className="w-9 h-9 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 flex items-center justify-center transition-colors"
+                >
+                  &times;
+                </button>
+              </div>
+
+              {/* Sync + step selector */}
+              <div className="flex items-center gap-2 mb-3">
+                <button
+                  onClick={handleArmSyncFromRobot}
+                  disabled={isDisabled}
+                  className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg transition-colors disabled:opacity-40"
+                >
+                  Read Current
+                </button>
+                <div className="flex-1" />
+                <span className="text-[10px] text-gray-600 uppercase tracking-wider">Step</span>
+                {ARM_STEP_OPTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setArmStepRadians(s)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                      armStepRadians === s
+                        ? "bg-amber-600 text-white"
+                        : "bg-gray-800 text-gray-500 hover:text-gray-300"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+                <span className="text-[10px] text-gray-600">rad</span>
+              </div>
+
+              {/* Joint rows */}
+              <div className="space-y-1 mb-4">
+                {ARM_JOINTS.map((joint, i) => {
+                  const value = targetJoints[i] ?? 0;
+                  const atMin = value <= joint.min;
+                  const atMax = value >= joint.max;
+                  const positionRatio = (value - joint.min) / (joint.max - joint.min);
+                  const jointBtnDisabled = isDisabled || robot.movingArm;
+
+                  return (
+                    <div key={i} className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-gray-500 w-[52px] shrink-0">J{i} {joint.name}</span>
+                        <button
+                          onClick={() => adjustJoint(i, -armStepRadians)}
+                          disabled={jointBtnDisabled || atMin}
+                          className="w-9 h-9 rounded-md bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 font-bold text-base transition-all disabled:opacity-25 disabled:cursor-not-allowed active:scale-90 shrink-0"
+                        >
+                          &minus;
+                        </button>
+                        <div className="flex-1 text-center font-mono text-xs text-gray-300 tabular-nums">
+                          {value.toFixed(armStepRadians < 0.05 ? 3 : 2)}
+                        </div>
+                        <button
+                          onClick={() => adjustJoint(i, armStepRadians)}
+                          disabled={jointBtnDisabled || atMax}
+                          className="w-9 h-9 rounded-md bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 font-bold text-base transition-all disabled:opacity-25 disabled:cursor-not-allowed active:scale-90 shrink-0"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-[52px] shrink-0" />
+                        <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden mx-[18px]">
+                          <div
+                            className="h-full bg-amber-600/60 rounded-full transition-all duration-100"
+                            style={{ width: `${Math.max(1, positionRatio * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Duration + Move */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <span>Duration</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={10}
+                    step={0.5}
+                    value={armDuration}
+                    onChange={(e) => setArmDuration(parseFloat(e.target.value) || 2)}
+                    disabled={isDisabled || robot.movingArm}
+                    className="w-14 px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs font-mono focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                  />
+                  <span>s</span>
+                </div>
+                <div className="flex-1" />
+                <button
+                  onClick={() => robot.moveArmToJoints(targetJoints, armDuration)}
+                  disabled={isDisabled || robot.movingArm}
+                  className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                >
+                  {robot.movingArm ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Moving...
+                    </span>
+                  ) : (
+                    "Move Arm"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── SkillPanel (slide-up overlay) ── */}
+      {showSkillPanel && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowSkillPanel(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-50 animate-slide-up">
+            <div className="max-w-2xl mx-auto bg-gray-950 border-t border-gray-800 rounded-t-2xl p-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Skill Executor</h3>
+                <button
+                  onClick={() => setShowSkillPanel(false)}
+                  className="w-9 h-9 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 flex items-center justify-center transition-colors"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <select
+                value={selectedSkillId}
+                onChange={(e) => setSelectedSkillId(e.target.value)}
+                disabled={isDisabled || robot.executingSkill}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-cyan-500 disabled:opacity-50 mb-3"
+              >
+                <option value="">Select a skill...</option>
+                {robot.availableSkills.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name || s.id}
+                  </option>
+                ))}
+              </select>
+
+              {selectedSkill && (
+                <>
+                  {selectedSkill.description && (
+                    <p className="text-xs text-gray-500 mb-3">{selectedSkill.description}</p>
+                  )}
+                  <div className="relative mb-3">
+                    <textarea
+                      value={skillInputsJson}
+                      onChange={(e) => {
+                        setSkillInputsJson(e.target.value);
+                        setSkillJsonError("");
+                      }}
+                      rows={5}
+                      disabled={isDisabled || robot.executingSkill}
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm font-mono focus:outline-none focus:border-cyan-500 disabled:opacity-50 resize-y"
+                      placeholder='{"param": "value"}'
+                    />
+                    {skillJsonError && <p className="text-xs text-red-400 mt-1">{skillJsonError}</p>}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSkillExecute}
+                      disabled={isDisabled || robot.executingSkill || !selectedSkillId}
+                      className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                    >
+                      {robot.executingSkill ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Executing...
+                        </span>
+                      ) : (
+                        "Execute"
+                      )}
+                    </button>
+                    {robot.executingSkill && (
+                      <button
+                        onClick={robot.cancelSkill}
+                        className="px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+    </div>
+  );
+}
+
+// ─── ConnectionBar ────────────────────────────────────────────────────────────
 
 function ConnectionBar({
   connectionStatus,
@@ -28,19 +882,10 @@ function ConnectionBar({
     onConnect(robotIp, port);
   };
 
-  const statusColor = {
-    disconnected: "bg-gray-500",
-    connecting: "bg-yellow-500 animate-pulse",
-    connected: "bg-green-500",
-    error: "bg-red-500",
-  }[connectionStatus];
-
   return (
-    <div className="flex items-center gap-3 p-4 bg-gray-900 border-b border-gray-800">
-      <div className="flex items-center gap-2">
-        <div className={`w-3 h-3 rounded-full ${statusColor}`} />
-        <span className="text-sm font-mono text-gray-400 uppercase">{connectionStatus}</span>
-      </div>
+    <div className="h-12 flex items-center gap-3 px-4 bg-gray-950/80 backdrop-blur border-b border-gray-800/50 shrink-0">
+      <div className={`w-2.5 h-2.5 rounded-full ${STATUS_COLORS[connectionStatus]}`} />
+      <span className="text-xs font-mono text-gray-500">{connectionStatus}</span>
       <div className="flex-1" />
       <input
         type="text"
@@ -48,816 +893,31 @@ function ConnectionBar({
         onChange={(e) => setRobotIp(e.target.value)}
         placeholder="Robot IP"
         disabled={connectionStatus === "connected" || connectionStatus === "connecting"}
-        className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm font-mono w-40 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+        className="px-2.5 py-1 bg-gray-900 border border-gray-800/50 rounded-lg text-xs font-mono text-gray-300 w-36 focus:outline-none focus:border-cyan-500/50 disabled:opacity-50 transition-colors"
       />
       <input
         type="number"
         value={port}
         onChange={(e) => setPort(parseInt(e.target.value) || 9090)}
         disabled={connectionStatus === "connected" || connectionStatus === "connecting"}
-        className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm font-mono w-20 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+        className="px-2.5 py-1 bg-gray-900 border border-gray-800/50 rounded-lg text-xs font-mono text-gray-300 w-16 focus:outline-none focus:border-cyan-500/50 disabled:opacity-50 transition-colors"
       />
       {connectionStatus === "connected" ? (
-        <button onClick={onDisconnect} className="px-4 py-1.5 bg-red-600 hover:bg-red-700 rounded text-sm font-medium transition-colors">
+        <button
+          onClick={onDisconnect}
+          className="px-3 py-1 bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 rounded-full text-xs font-medium transition-colors"
+        >
           Disconnect
         </button>
       ) : (
         <button
           onClick={handleConnect}
           disabled={connectionStatus === "connecting"}
-          className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition-colors disabled:opacity-50"
+          className="px-3 py-1 bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-600/30 rounded-full text-xs font-medium transition-colors disabled:opacity-50"
         >
           {connectionStatus === "connecting" ? "Connecting..." : "Connect"}
         </button>
       )}
-    </div>
-  );
-}
-
-// ─── Drive Controls ────────────────────────────────────────────────────────────
-
-function DriveControls({
-  onDrive,
-  onStop,
-  activeKeys,
-  disabled,
-}: {
-  onDrive: (linearX: number, angularZ: number) => void;
-  onStop: () => void;
-  activeKeys: Set<string>;
-  disabled: boolean;
-}) {
-  const [speed, setSpeed] = useState(0.15);
-
-  const handleDriveButton = (linearX: number, angularZ: number) => {
-    onDrive(linearX * speed, angularZ * speed * (SPEED_CAPS.MAX_ANGULAR_RADPS / SPEED_CAPS.MAX_LINEAR_MPS));
-  };
-
-  const btnClass = (key: string) =>
-    `w-14 h-14 rounded-lg font-bold text-lg transition-all ${
-      activeKeys.has(key)
-        ? "bg-blue-500 text-white scale-95 shadow-lg shadow-blue-500/30"
-        : "bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700"
-    } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer active:scale-95"}`;
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Drive</h3>
-        <span className="text-xs text-gray-500 font-mono">WASD</span>
-      </div>
-
-      <div className="flex flex-col items-center gap-1">
-        <button
-          className={btnClass("w")}
-          onPointerDown={() => handleDriveButton(1, 0)}
-          onPointerUp={onStop}
-          onPointerLeave={onStop}
-          disabled={disabled}
-        >
-          W
-        </button>
-        <div className="flex gap-1">
-          <button
-            className={btnClass("a")}
-            onPointerDown={() => handleDriveButton(0, 1)}
-            onPointerUp={onStop}
-            onPointerLeave={onStop}
-            disabled={disabled}
-          >
-            A
-          </button>
-          <button
-            className="w-14 h-14 rounded-lg bg-gray-800/50 border border-gray-800 flex items-center justify-center"
-            onClick={onStop}
-            disabled={disabled}
-          >
-            <div className="w-3 h-3 rounded-full bg-gray-600" />
-          </button>
-          <button
-            className={btnClass("d")}
-            onPointerDown={() => handleDriveButton(0, -1)}
-            onPointerUp={onStop}
-            onPointerLeave={onStop}
-            disabled={disabled}
-          >
-            D
-          </button>
-        </div>
-        <button
-          className={btnClass("s")}
-          onPointerDown={() => handleDriveButton(-1, 0)}
-          onPointerUp={onStop}
-          onPointerLeave={onStop}
-          disabled={disabled}
-        >
-          S
-        </button>
-      </div>
-
-      <div className="space-y-1">
-        <div className="flex justify-between text-xs text-gray-500">
-          <span>Speed</span>
-          <span className="font-mono">{speed.toFixed(2)} m/s</span>
-        </div>
-        <input
-          type="range"
-          min={0.05}
-          max={SPEED_CAPS.MAX_LINEAR_MPS}
-          step={0.01}
-          value={speed}
-          onChange={(e) => setSpeed(parseFloat(e.target.value))}
-          className="w-full accent-blue-500"
-          disabled={disabled}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ─── Head Tilt ─────────────────────────────────────────────────────────────────
-
-function HeadTilt({
-  onSetTilt,
-  disabled,
-}: {
-  onSetTilt: (degrees: number) => void;
-  disabled: boolean;
-}) {
-  const [tilt, setTilt] = useState(0);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Head Tilt</h3>
-        <span className="text-xs font-mono text-gray-500">{tilt}°</span>
-      </div>
-      <input
-        type="range"
-        min={-25}
-        max={25}
-        step={1}
-        value={tilt}
-        onChange={(e) => {
-          const val = parseInt(e.target.value);
-          setTilt(val);
-          onSetTilt(val);
-        }}
-        className="w-full accent-blue-500"
-        disabled={disabled}
-      />
-      <div className="flex justify-between text-xs text-gray-600">
-        <span>-25°</span>
-        <span>0°</span>
-        <span>25°</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Quick Actions ─────────────────────────────────────────────────────────────
-
-function QuickActions({
-  onEmotion,
-  onSpeak,
-  executingSkill,
-  disabled,
-}: {
-  onEmotion: (emotion: string) => void;
-  onSpeak: (text: string) => void;
-  executingSkill: boolean;
-  disabled: boolean;
-}) {
-  const [ttsText, setTtsText] = useState("");
-  const emotions = [
-    { id: "happy", label: "Happy" },
-    { id: "sad", label: "Sad" },
-    { id: "excited", label: "Excited" },
-    { id: "surprised", label: "Surprised" },
-    { id: "angry", label: "Angry" },
-  ];
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Quick Actions</h3>
-
-      <div className="space-y-2">
-        <span className="text-xs text-gray-500">Emotions</span>
-        <div className="flex flex-wrap gap-1.5">
-          {emotions.map((e) => (
-            <button
-              key={e.id}
-              onClick={() => onEmotion(e.id)}
-              disabled={disabled || executingSkill}
-              className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-xs font-medium transition-colors disabled:opacity-40"
-            >
-              {e.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <span className="text-xs text-gray-500">Text-to-Speech</span>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={ttsText}
-            onChange={(e) => setTtsText(e.target.value)}
-            placeholder="Say something..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && ttsText.trim()) {
-                onSpeak(ttsText.trim());
-                setTtsText("");
-              }
-            }}
-            disabled={disabled}
-            className="flex-1 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50"
-          />
-          <button
-            onClick={() => {
-              if (ttsText.trim()) {
-                onSpeak(ttsText.trim());
-                setTtsText("");
-              }
-            }}
-            disabled={disabled || !ttsText.trim()}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium transition-colors disabled:opacity-40"
-          >
-            Speak
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Camera View ──────────────────────────────────────────────────────────────
-
-function CameraView({
-  label,
-  cameraFrame,
-  cameraStreaming,
-  onCapturePhoto,
-  onToggleStream,
-  disabled,
-}: {
-  label: string;
-  cameraFrame: string | null;
-  cameraStreaming: boolean;
-  onCapturePhoto: () => void;
-  onToggleStream: () => void;
-  disabled: boolean;
-}) {
-  const downloadPhoto = () => {
-    if (!cameraFrame) return;
-    const link = document.createElement("a");
-    link.href = cameraFrame;
-    link.download = `${label.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.jpg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">{label}</h3>
-        {cameraStreaming && (
-          <span className="text-xs text-red-400 flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            LIVE
-          </span>
-        )}
-      </div>
-
-      <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden aspect-[4/3] flex items-center justify-center">
-        {cameraFrame ? (
-          <img src={cameraFrame} alt={label} className="w-full h-full object-contain" />
-        ) : (
-          <span className="text-gray-700 text-sm">No image</span>
-        )}
-      </div>
-
-      <div className="flex gap-1.5">
-        <button
-          onClick={cameraStreaming ? downloadPhoto : onCapturePhoto}
-          disabled={disabled || (cameraStreaming && !cameraFrame)}
-          className="flex-1 px-2 py-1.5 bg-cyan-600 hover:bg-cyan-700 rounded text-xs font-medium transition-colors disabled:opacity-40"
-        >
-          {cameraStreaming ? "Save" : "Photo"}
-        </button>
-        {cameraFrame && (
-          <button
-            onClick={downloadPhoto}
-            disabled={disabled}
-            className="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-medium transition-colors disabled:opacity-40"
-            title="Download"
-          >
-            DL
-          </button>
-        )}
-        <button
-          onClick={onToggleStream}
-          disabled={disabled}
-          className={`flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-40 ${
-            cameraStreaming
-              ? "bg-red-600 hover:bg-red-700"
-              : "bg-cyan-600 hover:bg-cyan-700"
-          }`}
-        >
-          {cameraStreaming ? "Stop" : "Stream"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Arm Joint Control ────────────────────────────────────────────────────────
-
-const JOINT_NAMES = ["Base", "Shoulder", "Elbow", "Wrist 1", "Wrist 2", "Wrist 3"];
-const JOINT_LIMITS = [
-  { min: -3.14, max: 3.14 },
-  { min: -3.14, max: 3.14 },
-  { min: -3.14, max: 3.14 },
-  { min: -3.14, max: 3.14 },
-  { min: -3.14, max: 3.14 },
-  { min: -3.14, max: 3.14 },
-];
-
-function ArmControl({
-  armJoints,
-  movingArm,
-  onReadState,
-  onMoveJoints,
-  disabled,
-}: {
-  armJoints: number[];
-  movingArm: boolean;
-  onReadState: () => void;
-  onMoveJoints: (joints: number[], duration: number) => void;
-  disabled: boolean;
-}) {
-  const [targetJoints, setTargetJoints] = useState<number[]>([0, 0, 0, 0, 0, 0]);
-  const [duration, setDuration] = useState(2.0);
-  const [synced, setSynced] = useState(false);
-
-  const handleSyncFromRobot = () => {
-    onReadState();
-    setSynced(true);
-  };
-
-  // Sync target joints when arm state updates (after read)
-  useEffect(() => {
-    if (synced) {
-      setTargetJoints([...armJoints]);
-      setSynced(false);
-    }
-  }, [armJoints, synced]);
-
-  const updateJoint = (index: number, value: number) => {
-    setTargetJoints((prev) => {
-      const next = [...prev];
-      next[index] = value;
-      return next;
-    });
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Arm Joints</h3>
-        <button
-          onClick={handleSyncFromRobot}
-          disabled={disabled}
-          className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded transition-colors disabled:opacity-40"
-        >
-          Read Current
-        </button>
-      </div>
-
-      <div className="space-y-2">
-        {JOINT_NAMES.map((name, i) => (
-          <div key={i} className="space-y-0.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-gray-500">J{i} — {name}</span>
-              <span className="text-gray-400 font-mono">{targetJoints[i]?.toFixed(3)} rad</span>
-            </div>
-            <input
-              type="range"
-              min={JOINT_LIMITS[i].min}
-              max={JOINT_LIMITS[i].max}
-              step={0.01}
-              value={targetJoints[i] ?? 0}
-              onChange={(e) => updateJoint(i, parseFloat(e.target.value))}
-              disabled={disabled || movingArm}
-              className="w-full accent-amber-500"
-            />
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 text-xs text-gray-500">
-          <span>Duration</span>
-          <input
-            type="number"
-            min={0.5}
-            max={10}
-            step={0.5}
-            value={duration}
-            onChange={(e) => setDuration(parseFloat(e.target.value) || 2)}
-            disabled={disabled || movingArm}
-            className="w-14 px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs font-mono focus:outline-none focus:border-amber-500 disabled:opacity-50"
-          />
-          <span>s</span>
-        </div>
-        <div className="flex-1" />
-        <button
-          onClick={() => onMoveJoints(targetJoints, duration)}
-          disabled={disabled || movingArm}
-          className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 rounded text-sm font-medium transition-colors disabled:opacity-40"
-        >
-          {movingArm ? (
-            <span className="flex items-center gap-2">
-              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Moving...
-            </span>
-          ) : (
-            "Move Arm"
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Skill Executor ────────────────────────────────────────────────────────────
-
-function SkillExecutor({
-  availableSkills,
-  onExecute,
-  onCancel,
-  executingSkill,
-  disabled,
-}: {
-  availableSkills: SkillInfo[];
-  onExecute: (skillType: string, inputs: Record<string, unknown>) => void;
-  onCancel: () => void;
-  executingSkill: boolean;
-  disabled: boolean;
-}) {
-  const [selectedSkillId, setSelectedSkillId] = useState("");
-  const [inputsJson, setInputsJson] = useState("{}");
-  const [jsonError, setJsonError] = useState("");
-
-  const selectedSkill = availableSkills.find((s) => s.id === selectedSkillId);
-
-  // When skill selection changes, pre-fill input template
-  useEffect(() => {
-    if (selectedSkill?.inputs_json) {
-      try {
-        const schema = JSON.parse(selectedSkill.inputs_json);
-        // Build template from schema properties
-        const template: Record<string, unknown> = {};
-        if (schema.properties) {
-          for (const [key, prop] of Object.entries(schema.properties)) {
-            const p = prop as Record<string, unknown>;
-            if (p.default !== undefined) {
-              template[key] = p.default;
-            } else if (p.type === "number") {
-              template[key] = 0.0;
-            } else if (p.type === "string") {
-              template[key] = "";
-            } else if (p.type === "boolean") {
-              template[key] = false;
-            }
-          }
-        }
-        setInputsJson(JSON.stringify(template, null, 2));
-        setJsonError("");
-      } catch {
-        setInputsJson("{}");
-      }
-    } else {
-      setInputsJson("{}");
-    }
-  }, [selectedSkillId, selectedSkill]);
-
-  const handleExecute = () => {
-    try {
-      const inputs = JSON.parse(inputsJson);
-      setJsonError("");
-      onExecute(selectedSkillId, inputs);
-    } catch (err) {
-      setJsonError(err instanceof Error ? err.message : "Invalid JSON");
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Skill Executor</h3>
-
-      <select
-        value={selectedSkillId}
-        onChange={(e) => setSelectedSkillId(e.target.value)}
-        disabled={disabled || executingSkill}
-        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50"
-      >
-        <option value="">Select a skill...</option>
-        {availableSkills.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name || s.id}
-          </option>
-        ))}
-      </select>
-
-      {selectedSkill && (
-        <>
-          {selectedSkill.description && (
-            <p className="text-xs text-gray-500">{selectedSkill.description}</p>
-          )}
-          <div className="relative">
-            <textarea
-              value={inputsJson}
-              onChange={(e) => {
-                setInputsJson(e.target.value);
-                setJsonError("");
-              }}
-              rows={5}
-              disabled={disabled || executingSkill}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50 resize-y"
-              placeholder='{"param": "value"}'
-            />
-            {jsonError && <p className="text-xs text-red-400 mt-1">{jsonError}</p>}
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleExecute}
-              disabled={disabled || executingSkill || !selectedSkillId}
-              className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm font-medium transition-colors disabled:opacity-40"
-            >
-              {executingSkill ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Executing...
-                </span>
-              ) : (
-                "Execute"
-              )}
-            </button>
-            {executingSkill && (
-              <button
-                onClick={onCancel}
-                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded text-sm font-medium transition-colors"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── E-Stop ────────────────────────────────────────────────────────────────────
-
-function EStopButton({ onEstop, disabled }: { onEstop: () => void; disabled: boolean }) {
-  return (
-    <button
-      onClick={onEstop}
-      disabled={disabled}
-      className="w-full py-4 bg-red-700 hover:bg-red-600 active:bg-red-800 border-2 border-red-500 rounded-lg text-xl font-black uppercase tracking-widest transition-all disabled:opacity-40 active:scale-[0.98] shadow-lg shadow-red-900/50"
-    >
-      E-STOP (Space)
-    </button>
-  );
-}
-
-// ─── Log Panel ─────────────────────────────────────────────────────────────────
-
-function LogPanel({ logs, onClear }: { logs: LogEntry[]; onClear: () => void }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [logs]);
-
-  const typeStyles: Record<LogEntry["type"], string> = {
-    info: "text-gray-400",
-    error: "text-red-400",
-    feedback: "text-yellow-400",
-    result: "text-green-400",
-  };
-
-  const typePrefix: Record<LogEntry["type"], string> = {
-    info: "INFO",
-    error: "ERR ",
-    feedback: "FEED",
-    result: "RSLT",
-  };
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Log</h3>
-        <button onClick={onClear} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
-          Clear
-        </button>
-      </div>
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto bg-gray-950 border border-gray-800 rounded-lg p-2 font-mono text-xs space-y-0.5 min-h-[120px] max-h-[300px]"
-      >
-        {logs.length === 0 ? (
-          <p className="text-gray-700 italic">No logs yet. Connect to the robot to begin.</p>
-        ) : (
-          logs.map((log, i) => (
-            <div key={i} className={`${typeStyles[log.type]} break-all`}>
-              <span className="text-gray-600">{new Date(log.timestamp).toLocaleTimeString()}</span>{" "}
-              <span className="text-gray-500">[{typePrefix[log.type]}]</span>{" "}
-              {log.message}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Page ─────────────────────────────────────────────────────────────────
-
-export default function Home() {
-  const robot = useRobot();
-  const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set());
-  const activeKeysRef = useRef<Set<string>>(new Set());
-  const driveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const isDisabled = robot.connectionStatus !== "connected";
-
-  // Extract stable function refs to avoid effect re-runs
-  const { publishCmdVel, stopDriving, estop } = robot;
-
-  // Keyboard drive controls
-  const updateDriveFromKeys = useCallback(() => {
-    const keys = activeKeysRef.current;
-    let linearX = 0;
-    let angularZ = 0;
-    const speed = 0.15;
-
-    if (keys.has("w")) linearX += speed;
-    if (keys.has("s")) linearX -= speed;
-    if (keys.has("a")) angularZ += speed * (SPEED_CAPS.MAX_ANGULAR_RADPS / SPEED_CAPS.MAX_LINEAR_MPS);
-    if (keys.has("d")) angularZ -= speed * (SPEED_CAPS.MAX_ANGULAR_RADPS / SPEED_CAPS.MAX_LINEAR_MPS);
-
-    if (linearX !== 0 || angularZ !== 0) {
-      publishCmdVel(linearX, angularZ);
-    }
-  }, [publishCmdVel]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't capture when typing in inputs
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-      if (e.key === " ") {
-        e.preventDefault();
-        estop();
-        return;
-      }
-
-      const key = e.key.toLowerCase();
-      if (["w", "a", "s", "d"].includes(key) && !activeKeysRef.current.has(key)) {
-        activeKeysRef.current.add(key);
-        setActiveKeys(new Set(activeKeysRef.current));
-
-        // Start drive loop if not running
-        if (!driveIntervalRef.current) {
-          driveIntervalRef.current = setInterval(updateDriveFromKeys, 100); // 10Hz
-        }
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (["w", "a", "s", "d"].includes(key)) {
-        activeKeysRef.current.delete(key);
-        setActiveKeys(new Set(activeKeysRef.current));
-
-        // Stop drive loop if no keys pressed
-        if (activeKeysRef.current.size === 0) {
-          if (driveIntervalRef.current) {
-            clearInterval(driveIntervalRef.current);
-            driveIntervalRef.current = null;
-          }
-          stopDriving();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      if (driveIntervalRef.current) {
-        clearInterval(driveIntervalRef.current);
-      }
-    };
-  }, [estop, stopDriving, updateDriveFromKeys]);
-
-  const handleEmotion = (emotion: string) => {
-    robot.executeSkill(SkillIds.HEAD_EMOTION, { emotion });
-  };
-
-  return (
-    <div className="min-h-screen flex flex-col">
-      {/* Connection Bar */}
-      <ConnectionBar
-        connectionStatus={robot.connectionStatus}
-        onConnect={robot.connect}
-        onDisconnect={robot.disconnect}
-      />
-
-      {/* Main Content */}
-      <div className="flex-1 p-4 grid grid-cols-1 md:grid-cols-[240px_1fr_280px] gap-4 max-w-7xl mx-auto w-full">
-        {/* Left Column — Drive + Head + Quick Actions */}
-        <div className="space-y-6">
-          <DriveControls
-            onDrive={robot.publishCmdVel}
-            onStop={robot.stopDriving}
-            activeKeys={activeKeys}
-            disabled={isDisabled}
-          />
-
-          <HeadTilt onSetTilt={robot.setHeadTilt} disabled={isDisabled} />
-
-          <QuickActions
-            onEmotion={handleEmotion}
-            onSpeak={robot.speak}
-            executingSkill={robot.executingSkill}
-            disabled={isDisabled}
-          />
-        </div>
-
-        {/* Middle Column — Cameras + Arm */}
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-3">
-            <CameraView
-              label="Main Camera"
-              cameraFrame={robot.mainCameraFrame}
-              cameraStreaming={robot.mainCameraStreaming}
-              onCapturePhoto={robot.captureMainPhoto}
-              onToggleStream={robot.toggleMainCameraStream}
-              disabled={isDisabled}
-            />
-            <CameraView
-              label="Arm Camera"
-              cameraFrame={robot.armCameraFrame}
-              cameraStreaming={robot.armCameraStreaming}
-              onCapturePhoto={robot.captureArmPhoto}
-              onToggleStream={robot.toggleArmCameraStream}
-              disabled={isDisabled}
-            />
-          </div>
-
-          <ArmControl
-            armJoints={robot.armJoints}
-            movingArm={robot.movingArm}
-            onReadState={robot.readArmState}
-            onMoveJoints={robot.moveArmToJoints}
-            disabled={isDisabled}
-          />
-        </div>
-
-        {/* Right Column — Skills + E-Stop + Log */}
-        <div className="space-y-4">
-          <SkillExecutor
-            availableSkills={robot.availableSkills}
-            onExecute={robot.executeSkill}
-            onCancel={robot.cancelSkill}
-            executingSkill={robot.executingSkill}
-            disabled={isDisabled}
-          />
-
-          {/* E-Stop */}
-          <EStopButton onEstop={robot.estop} disabled={isDisabled} />
-
-          {/* Log */}
-          <LogPanel logs={robot.logs} onClear={robot.clearLogs} />
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="p-2 text-center text-xs text-gray-700 border-t border-gray-900">
-        MARS Robot Control — Tripoli Rosbridge Client
-      </div>
     </div>
   );
 }
