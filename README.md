@@ -51,7 +51,13 @@ bun run src/demo-self-clean.ts 172.17.30.145
 **6. Backing up to realign — path correction**
 ![Robot backed up and realigned with the brush station](assets/demo-06-realigning.jpg)
 
-**7. The cleaning station — exterior shot**
+**7. Close-up of the MARS robot**
+![Close-up overhead view of the MARS robot](assets/demo-07-robot-closeup.jpg)
+
+**8. Approaching the station — robot's-eye view**
+![Robot approaching the REDPLANET cleaning station up close](assets/demo-08-approaching-station.jpg)
+
+**9. The cleaning station — exterior shot**
 ![MARS robot driving through the Red Planet cleaning station](assets/cleaning-station.jpg)
 
 ---
