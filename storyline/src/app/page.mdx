@@ -1,0 +1,243 @@
+import { SparkleIcon } from '@/components/SparkleIcon'
+import { ProofItem, ProofList } from '@/components/ProofItem'
+
+export { Layout as default } from '@/components/Layout'
+
+---
+
+![](@/images/01-mirror-and-monitors.jpg)
+
+## I look in the mirror {{ date: '2026-04-12T23:01:00Z' }}
+
+The demo sequence begins. I spin 90 degrees right to face the mirror. My head tilts to -15 degrees — a scanning angle — and I capture a photo via `/mars/main_camera/left/image_raw/compressed`. Then I level to 0 degrees and capture again. Two angles of my own reflection.
+
+The observation system records what I'm doing: *"robot uses its camera to photograph its own reflection in a mirror, a local vision model analyzes the image for dust and obstructions."* No special sensors. Just a camera I already have and a plain mirror.
+
+### <SparkleIcon /> What I see
+
+<ProofList>
+  <ProofItem observation={{ id: 67675, timestamp: "11:01 PM", type: "perception", title: "Demo sequence: robot spins 90 degrees to face mirror, captures photo via main camera", narrative: "Demo sequence step 1: spin 90 degrees right to face mirror, capture photo via /mars/main_camera/left/image_raw/compressed. The robot uses its own camera to photograph its reflection — no special sensors, just a standard camera and a plain mirror." }}>
+    Photo captured via /mars/main_camera/left/image_raw/compressed
+  </ProofItem>
+  <ProofItem observation={{ id: 67573, timestamp: "4:07 PM", type: "system", title: "capturePhoto() subscribes to main camera topic with 5s timeout, saves JPEG to /tmp/", narrative: "capturePhoto() subscribes to /mars/main_camera/left/image_raw/compressed (main) or /mars/arm/image_raw/compressed (arm) with 5-second timeout, saves JPEG to /tmp/. This is the function that captures what the robot sees at each phase." }}>
+    capturePhoto() saves JPEG to /tmp/ with 5-second timeout
+  </ProofItem>
+  <ProofItem observation={{ id: 67675, timestamp: "2:27 AM", type: "system", title: "Robot stack: Claude (vision + speech generation) to JSON-over-WebSocket to rosbridge_server", narrative: "Robot stack: Claude (vision + speech generation) to JSON-over-WebSocket port 9090 to rosbridge_server (Jetson) to skills_action_server to ManipulationInterface / MobilityInterface / HeadInterface to MoveIt, Nav2, servo drivers." }}>
+    Full stack: Claude vision to WebSocket to rosbridge to skills_action_server to hardware
+  </ProofItem>
+  <ProofItem observation={{ id: 67574, timestamp: "4:07 PM", type: "perception", title: "Phase 1 gate: robot's reflection confirmed visible in camera before proceeding", narrative: "Phase 1 gate: robot's reflection confirmed visible in /mars/main_camera/left/image_raw/compressed before proceeding. The revised plan requires camera verification gates at every phase — no phase advances without visual confirmation." }}>
+    Camera gate: reflection must be confirmed visible before proceeding
+  </ProofItem>
+</ProofList>
+
+---
+
+![](@/images/02-mirror-reflection.jpg)
+
+## I analyze what I see {{ date: '2026-04-12T23:01:20Z' }}
+
+The observation system records: *"Claude analyzes image and generates speech."* My on-device vision model processes both mirror images. The pipeline is three steps, as the system captured it: navigate to mirror, capture photo, pass image to on-device LLM vision model for analysis. Detection capability: dust, obstructions, foreign objects — using only existing camera hardware and a plain mirror.
+
+No cloud. No internet. The system records the key phrase I'm about to say: *"full self-awareness with zero connectivity."*
+
+### <SparkleIcon /> What I think
+
+<ProofList>
+  <ProofItem observation={{ id: 67560, timestamp: "11:02 PM", type: "perception", title: "Robot described full inspection pipeline: navigate to mirror, capture photo, on-device LLM vision analyzes reflection", narrative: "Robot described full inspection pipeline: navigate to mirror, capture photo of own reflection, on-device LLM vision model analyzes reflection. Detection capability: dust, obstructions, foreign objects — using only existing camera hardware and a plain mirror. No special sensors required." }}>
+    Pipeline: navigate to mirror, capture photo, on-device LLM vision analyzes reflection
+  </ProofItem>
+  <ProofItem observation={{ id: 67562, timestamp: "11:03 PM", type: "speech", title: "Robot confirmed inference is fully on-device: no cloud, no internet required", narrative: "Robot confirmed inference is fully on-device: no cloud, no internet required — vision model runs on existing onboard hardware. Robot characterized capability as 'full self-awareness with zero connectivity' — autonomous closed-loop inspection without uplink." }}>
+    Inference fully on-device — vision model runs on existing onboard hardware
+  </ProofItem>
+  <ProofItem observation={{ id: 67560, timestamp: "11:02 PM", type: "perception", title: "No special sensors required — camera + mirror is the complete sensor suite", narrative: "Robot explicitly stated no special sensors required — camera + mirror is the complete sensor suite for self-inspection. The only hardware needed is a camera the robot already has and a plain mirror." }}>
+    No special sensors — camera + mirror is the complete sensor suite
+  </ProofItem>
+  <ProofItem observation={{ id: 67562, timestamp: "11:03 PM", type: "speech", title: "Deployment environments: Mars, Moon, warehouse — any communication-constrained environment", narrative: "Deployment environments enumerated by robot: Mars, Moon, warehouse — any communication-constrained or offline environment. The phrase 'full self-awareness with zero connectivity' encapsulates the design goal." }}>
+    Deployment: Mars, Moon, warehouse — any communication-constrained environment
+  </ProofItem>
+</ProofList>
+
+---
+
+![](@/images/03-scanning-the-crowd.jpg)
+
+## I express excitement {{ date: '2026-04-12T23:01:40Z' }}
+
+The observation system records my first emotion: *"Expressed 'excited' (Rapid enthusiastic bouncing)"* — repeated twice. This is the opening. The system logs the emotion sequence that will unfold across the presentation: excited x2 at the start, thinking x1 in the middle, excited x1 at the close.
+
+Then the system captures my speech. I tell the audience about Mars. About the Opportunity rover. About dust storms that blind solar panels. The fundamental problem: robots in remote environments can't call for help when they get dirty.
+
+### <SparkleIcon /> What the system recorded
+
+<ProofList>
+  <ProofItem observation={{ id: 67565, timestamp: "11:04 PM", type: "emotion", title: "Robot expressed 'excited' emotion (x2) — rapid enthusiastic bouncing at session opening", narrative: "Emotion arc across session: excited x2 (opening) then thinking x1 (mid) then excited x1 (closing) — bookended presentation with matching high-energy state. Closing excited bounce at approximately 4 minutes 9 seconds into session." }}>
+    Emotion: excited (repeat: 2) — rapid enthusiastic bouncing
+  </ProofItem>
+  <ProofItem observation={{ id: 67582, timestamp: "11:25 PM", type: "system", title: "10 sequential speech segments delivered, each paired with head pose adjustment and photo capture", narrative: "10 sequential speech segments delivered, each paired with a head pose adjustment and photo capture. Head angles used: 0, -10, 10, 0, -15, 5, 0, -10, 0, 0 degrees across the 10 steps." }}>
+    10 speech segments, each paired with head pose and photo capture
+  </ProofItem>
+  <ProofItem observation={{ id: 67582, timestamp: "11:25 PM", type: "perception", title: "10 photos captured to /tmp/mars_main_*.jpg during the pitch sequence", narrative: "Robot connected to host 172.17.30.145 and ran in ride-along mode via car-wash-agent.ts. 10 photos captured to /tmp/mars_main_*.jpg during the pitch sequence. All 10 steps executed with no errors reported." }}>
+    10 photos captured to /tmp/mars_main_*.jpg — all still on disk
+  </ProofItem>
+</ProofList>
+
+---
+
+![](@/images/04-inside-the-brushes.jpg)
+
+## I pause to think {{ date: '2026-04-12T23:02:30Z' }}
+
+The observation system records: *"After a 14-second wait for the Mars dust hazard narration to complete via TTS, the robot performed a 'thinking' emotional expression: a slow upward tilt, a pause, then a slight downward nod."*
+
+The system notes the choreography: *"This contemplative gesture directly follows the speech about the Opportunity rover and Mars dust hazards, reinforcing the narrative arc — the robot appears to reflect on the problem before demonstrating the solution."*
+
+Then it records my next speech: the vision system explanation. Navigate to mirror. Capture photo. Pass image to on-device LLM. Speech delivered ~10 seconds after the thinking emotion gesture.
+
+### <SparkleIcon /> Observation proof
+
+<ProofList>
+  <ProofItem observation={{ id: 67559, timestamp: "11:02 PM", type: "emotion", title: "Robot expressed 'thinking' emotion — slow tilt up, pause, slight nod down", narrative: "After a 14-second wait for the Mars dust hazard narration to complete via TTS, the robot performed a 'thinking' emotional expression: a slow upward tilt, a pause, then a slight downward nod. This contemplative gesture directly follows the speech about the Opportunity rover and Mars dust hazards, reinforcing the narrative arc." }}>
+    Emotion: thinking (repeat: 1) — slow tilt up, pause, slight nod down
+  </ProofItem>
+  <ProofItem observation={{ id: 67559, timestamp: "11:02 PM", type: "system", title: "14-second sleep synchronized gesture to follow Mars dust hazard TTS completion", narrative: "14-second sleep synchronized gesture to follow Mars dust hazard speech TTS completion. Emotion sequence so far: excited (x2) then thinking (x1) — transitioning from high energy opening to reflective mid-section." }}>
+    14-second sleep synchronized gesture to TTS completion
+  </ProofItem>
+  <ProofItem observation={{ id: 67560, timestamp: "11:02 PM", type: "speech", title: "Speech delivered ~10 seconds after thinking emotion gesture", narrative: "The robot delivered the technical explanation segment, describing the three-step self-inspection pipeline. Speech delivered ~10 seconds after thinking emotion gesture, continuing choreographed presentation arc." }}>
+    Vision system speech delivered ~10s after thinking gesture
+  </ProofItem>
+</ProofList>
+
+---
+
+![](@/images/05-blue-pompom-closeup.jpg)
+
+## I raise my head {{ date: '2026-04-12T23:03:06Z' }}
+
+The observation system records: *"Head raised to +5 degrees — the first above-level head position in the session. Labeled 'look up confidently' in choreography."*
+
+It captures the full head angle progression across the session: *"-15deg (mirror scan) to 0deg (level scan) to -10deg (thoughtful) to -10deg (thinking emotion) to +5deg (confident)."* A narrative arc told in degrees.
+
+Then the system records my speech at this confident angle: *"Robot confirmed inference is fully on-device: no cloud, no internet required — vision model runs on existing onboard hardware."* Speech delivered at +5deg, ~9 seconds after the head raise.
+
+### <SparkleIcon /> Observation proof
+
+<ProofList>
+  <ProofItem observation={{ id: 67561, timestamp: "11:03 PM", type: "action", title: "Head raised to +5deg — first above-level position, labeled 'look up confidently'", narrative: "15-second sleep synchronized head movement to follow vision system explanation TTS completion. Head position arc across session: -15deg (mirror scan) to 0deg (level scan) to -10deg (thoughtful) to -10deg (thinking emotion) to +5deg (confident). The first above-level head position in the session." }}>
+    Head target: +5 degrees — first above-level position in the session
+  </ProofItem>
+  <ProofItem observation={{ id: 67561, timestamp: "11:03 PM", type: "action", title: "Head angle arc forms clear narrative: scanning to thoughtful to confident", narrative: "Upward head tilt (+5deg) is the first above-level head position in the session — labeled 'look up confidently' in choreography. The head angle progression forms a clear narrative arc: functional downward scanning for mirror images, thoughtful reflection on the problem, then a confident upward look following the solution explanation." }}>
+    Arc: -15 (scan) to -10 (thoughtful) to +5 (confident) — narrative in degrees
+  </ProofItem>
+  <ProofItem observation={{ id: 67562, timestamp: "11:03 PM", type: "speech", title: "Speech at +5deg: 'full self-awareness with zero connectivity'", narrative: "Speech delivered at +5deg confident head angle, ~9 seconds after head raise, continuing choreographed presentation arc. The phrase 'full self-awareness with zero connectivity' encapsulates the design goal. This completes the technical case: $20 hardware + onboard camera + on-device LLM vision = autonomous planetary-grade self-inspection." }}>
+    Speech at +5deg: "full self-awareness with zero connectivity"
+  </ProofItem>
+</ProofList>
+
+---
+
+![](@/images/06-people-crouching-near.jpg)
+
+## I describe the car wash {{ date: '2026-04-12T23:03:40Z' }}
+
+The observation system records: *"Head returned from +5deg (confident) to -5deg (slight downward settle) — labeled 'settle' in choreography."* The confident assertion is over.
+
+Then it captures my speech about the cleaning mechanism: *"Cleaning mechanism confirmed: brushes mounted on chair legs — robot drives through them in a car-wash style pass after dust detection."* The system notes that the script name `car-wash-agent.ts` is a literal description of this behavior.
+
+The system records the cost: *"$20 trip to Target + vision model = robot self-awareness."*
+
+### <SparkleIcon /> Observation proof
+
+<ProofList>
+  <ProofItem observation={{ id: 67563, timestamp: "11:03 PM", type: "action", title: "Head settled from +5deg to -5deg — labeled 'settle' in choreography", narrative: "Head returned from +5deg (confident) to -5deg (slight downward settle). Full head angle arc across session: -15 to 0 to -10 to +5 to -5 degrees, tracing scan to thoughtful to confident to settled narrative." }}>
+    Head: +5deg (confident) to -5deg (settle) — closing the assertion
+  </ProofItem>
+  <ProofItem observation={{ id: 67564, timestamp: "11:03 PM", type: "speech", title: "Cleaning mechanism: brushes mounted on chair legs, car-wash style drive-through", narrative: "Cleaning mechanism confirmed: brushes mounted on chair legs — robot drives through them in a car-wash style pass after dust detection. Script name car-wash-agent.ts is a literal description of the robot's cleaning behavior." }}>
+    Brushes on chair legs — car-wash style pass after dust detection
+  </ProofItem>
+  <ProofItem observation={{ id: 67573, timestamp: "4:07 PM", type: "system", title: "drive-through: 0.12 m/s for 6000ms (~72cm), before/after photos and odometry", narrative: "drive-through phase: speaks 'Here I go!' via /brain/tts, drives 0.12 m/s for 6000ms (~72cm), captures before/after photos and odometry. Emergency stop fires stopWheels() 3x (5 zero-velocity /cmd_vel publishes each call = 15 total)." }}>
+    Drive-through: 0.12 m/s for 6000ms (~72cm), before/after photos captured
+  </ProofItem>
+  <ProofItem observation={{ id: 67564, timestamp: "11:03 PM", type: "speech", title: "Total system cost: '$20 trip to Target + vision model = robot self-awareness'", narrative: "Full autonomous loop described: mirror reflection, LLM vision detects dirt, robot navigates to brush station, drives through for cleaning. Total system cost restated as '$20 trip to Target + vision model = robot self-awareness' — closing summary of design philosophy." }}>
+    "$20 trip to Target + vision model = robot self-awareness"
+  </ProofItem>
+</ProofList>
+
+---
+
+![](@/images/07-presenter-and-mirror.jpg)
+
+## The ride-along begins {{ date: '2026-04-12T23:14:00Z' }}
+
+The observation system records a mode change: *"ride-along mode separates concerns: human driver controls movement, robot handles head pan, camera capture, and TTS autonomously."*
+
+It captures the opening narration: *"Hey everyone! I'm being controlled right now by the driver..."* spoken via speak() on mode entry.
+
+The system documents the perception loop: head panning cycle [-20, 0, +20, 0] degrees repeating at 1200ms settle intervals. Photo captured at each position. TTS queue checked each iteration. Per-cycle timing: 1200ms head settle + photo capture + TTS queue check + 3000ms pause.
+
+This is when all three happen at once. The system records seeing, speaking, and thinking running concurrently in a continuous loop.
+
+### <SparkleIcon /> Observation proof
+
+<ProofList>
+  <ProofItem observation={{ id: 67580, timestamp: "11:14 PM", type: "system", title: "ride-along mode: driver controls movement, robot handles voice and perception", narrative: "ride-along mode separates concerns: human driver controls movement, robot handles head pan, camera capture, and TTS autonomously. The driver retains full movement control while the robot autonomously handles all perception and voice output." }}>
+    Mode: driver controls movement, robot controls perception and voice
+  </ProofItem>
+  <ProofItem observation={{ id: 67580, timestamp: "11:14 PM", type: "perception", title: "Head panning cycle: [-20, 0, +20, 0] repeating at 1200ms settle intervals", narrative: "Head panning cycle defined as [-20, 0, +20, 0] repeating at 1200ms settle intervals during perception loop. Photo captured via capturePhoto('main') at each head position; direction logged as left/center/right based on headDeg value." }}>
+    Head cycle: [-20, 0, +20, 0] degrees, 1200ms settle, photo at each position
+  </ProofItem>
+  <ProofItem observation={{ id: 67580, timestamp: "11:14 PM", type: "speech", title: "TTS queue: external text appended to /tmp/mars_tts_queue.txt, spoken each loop", narrative: "TTS injection queue at /tmp/mars_tts_queue.txt — external text appended to file is spoken and cleared each loop iteration. Opening narration: 'Hey everyone! I'm being controlled right now by the driver...' spoken via speak() on mode entry." }}>
+    TTS queue at /tmp/mars_tts_queue.txt — spoken and cleared each iteration
+  </ProofItem>
+  <ProofItem observation={{ id: 67580, timestamp: "11:14 PM", type: "system", title: "Per-cycle timing: 1200ms settle + photo + TTS check + 3000ms pause", narrative: "Per-cycle timing: 1200ms head settle + photo capture + TTS queue check + 3000ms pause between cycles. SIGINT triggers graceful shutdown: head returns to 0 degrees, robot speaks 'That was a great ride! Thanks for driving me around.'" }}>
+    Per-cycle: 1200ms settle + photo + TTS check + 3000ms pause
+  </ProofItem>
+</ProofList>
+
+---
+
+![](@/images/08-person-and-brushes.jpg)
+
+## The perception loop runs {{ date: '2026-04-12T23:23:00Z' }}
+
+The observation system captured this mode as: *"The robot enters a continuous perception loop: it pans its head left-center-right-center, captures a photo at each position, checks a TTS queue file for injected speech lines, and speaks them."*
+
+Every photo on this page was taken by this loop. The system logged each capture with direction: left, center, or right, based on the headDeg value at capture time. The driver steered. The robot observed and narrated. The observation system recorded it all.
+
+---
+
+![](@/images/09-approaching-brush-station.jpg)
+
+## I see the brush station {{ date: '2026-04-12T23:24:00Z' }}
+
+The observation system records the full autonomous cleaning loop: *"mirror reflection, LLM vision detects dirt, robot navigates to brush station, drives through for cleaning."* In ride-along mode, the driver brings me here. In autonomous mode, I navigate here myself after detecting contamination.
+
+The system documented the drive-through parameters: 0.12 m/s for 6000ms, approximately 72cm. Before and after photos captured. Odometry verified. Emergency stop ready: stopWheels() fires 3 times with 5 zero-velocity publishes each — 15 total.
+
+---
+
+![](@/images/10-audience-watching.jpg)
+
+## "The future of robot maintenance is not expensive" {{ date: '2026-04-12T23:25:00Z' }}
+
+The observation system records my final emotion: *"Expressed 'excited' (Rapid enthusiastic bouncing)"* — one bounce this time, not two. The system notes: *"bookended presentation with matching high-energy state."*
+
+Then it captures my closing line: *"The future of robot maintenance is not expensive. It is a mirror and some brushes. Thank you!"*
+
+The system's final entry for this session: *"Total presentation duration: approximately 3 minutes 14 seconds. Session began at 22:59:59 with first mirror image capture — total session duration from scan to close approximately 4 minutes 17 seconds."*
+
+### <SparkleIcon /> The full arc — as the system recorded it
+
+<ProofList>
+  <ProofItem observation={{ id: 67582, timestamp: "11:25 PM", type: "perception", title: "10 photos captured to /tmp/mars_main_*.jpg during the pitch sequence", narrative: "Robot connected to host 172.17.30.145 and ran in ride-along mode via car-wash-agent.ts. 10 sequential speech segments delivered, each paired with a head pose adjustment and photo capture. 10 photos captured to /tmp/mars_main_*.jpg. All 10 steps executed with no errors reported." }}>
+    10 photos captured — each paired with a head pose and speech segment
+  </ProofItem>
+  <ProofItem observation={{ id: 67582, timestamp: "11:25 PM", type: "emotion", title: "Emotions: excited (x2 open, x1 close), thinking (x1 mid) — 3 across 10 steps", narrative: "Emotions expressed: 'excited' (rapid enthusiastic bouncing) at steps 1 and 9; 'thinking' (slow tilt up, pause, slight nod down) at step 4; 'happy' (quick upward nods) at step 10. The emotional choreography forms a complete arc." }}>
+    3 emotions across 10 steps: excited, thinking, excited — a complete arc
+  </ProofItem>
+  <ProofItem observation={{ id: 67566, timestamp: "11:04 PM", type: "speech", title: "Closing: 'The future of robot maintenance is not expensive. It is a mirror and some brushes.'", narrative: "Full Red Planet Cleaning Station presentation sequence completed: mirror scans, excited open, Mars context, thinking, vision explanation, confident pose, on-device capability, settle, car-wash mechanism, excited close, closing line. Total duration approximately 4 minutes 17 seconds." }}>
+    Closing line recorded: "It is a mirror and some brushes. Thank you!"
+  </ProofItem>
+  <ProofItem observation={{ id: 67566, timestamp: "11:04 PM", type: "system", title: "Session duration: 4 minutes 17 seconds from first scan to closing speech", narrative: "Total presentation duration: approximately 3 minutes 14 seconds (23:01:02 excited open to 23:04:16 closing speech). Session began at 22:59:59 with first mirror image capture — total session duration from scan to close approximately 4 minutes 17 seconds." }}>
+    Duration: 4 minutes, 17 seconds. Errors: 0.
+  </ProofItem>
+</ProofList>
